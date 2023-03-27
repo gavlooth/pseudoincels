@@ -11,11 +11,11 @@
 
 (setf *discord-client* (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
 
-(defvar  APPLICATION-ID  (gethash :DISCORD-APP-ID *config*))
+(defvar application-id  (gethash :DISCORD-APP-ID *config*))
 
-(defvar PUBLIC-KEY  (gethash :DISCORD-PUBLIC-KEY *config*))
+(defvar public-key  (gethash :DISCORD-PUBLIC-KEY *config*))
 
-(defvar token   (gethash :DISCORD-TOKEN *config*))
+(defvar *discord-token*   (gethash :DISCORD-TOKEN *config*))
 
 (defvar permisions "352724191280")
 
@@ -33,12 +33,16 @@
         :accessor event-data
         :initarg :event-data)
       (sequence-number
+        :initform nil
         :accessor sequence-number
         :initarg :sequence-number)
       (event-name
+        :initform nil
         :accessor event-name
         :initarg  :event-name)
       (message-trace
+
+        :initform nil
         :accessor message-trace
         :initarg  :message-trace)))
 
@@ -53,14 +57,15 @@
 
 
 (defmethod initialize-instance :around ((obj discord-message) &key  raw-message)
-  (let* ((message  (cl-json:decode-json-from-string raw-message))
-         (op-code  (au:aget message :op))
-         (event-data (au:aget message :d))
-         (sequence-number (au:aget message :s))
-         (event-name (au:aget message :t))
-         (message-trace (au:aget message :--TRACE)))
-    (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace)))
-
+  (if raw-message
+   (let* ((message  (cl-json:decode-json-from-string raw-message))
+          (op-code  (au:aget message :op))
+          (event-data (au:aget message :d))
+          (sequence-number (au:aget message :s))
+          (event-name (au:aget message :t))
+          (message-trace (au:aget message :--TRACE)))
+     (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace))
+   (call-next-method)))
 
 (defgeneric op-code-reaction* (msg connection code)
   (:documentation "Testing 'dynamic dispatch' "))
@@ -135,4 +140,15 @@
   (wsd:on :message discord-client on-message)
   (wsd:start-connection discord-client)))
 
+
+
+(defvar temp-object (make-instance 'discord-message
+                                  :op-code 2
+                                  :event-data  (pairlis  (list :token :properties)
+                                                         (list *discord-token*  '(("$os" . "linux") ("$browser" . "disco") ("$device" . "disco"))))))
+
 ; (defvar savarakatranemia (connect->discord))
+
+;  (json:encode-json-alist-to-string))
+;  2  	Identify  	Send  	Starts a new session during the initial handshake.)
+
