@@ -2,13 +2,11 @@
 
 (in-package #:pseudo-incels-bot)
 
-
 ; (ql:quickload :pseudo-incels-bot)
 
 ; (ql:quickload :chanl)
 
-;(ql:quickload :conf)
-(hash-keys *config*)
+; (ql:quickload :conf)
 
 
 (setf *discord-client* (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
@@ -27,7 +25,7 @@
 
 (defvar *open-ai-api-key* (gethash :gpt-token *config*))
 
-(defclass discord-msg  ()
+(defclass discord-message ()
      ((op-code
         :accessor op-code
         :initarg :op-code)
@@ -39,7 +37,41 @@
         :initarg :sequence-number)
       (event-name
         :accessor event-name
-        :initarg  event-name)))
+        :initarg  :event-name)
+      (message-trace
+        :accessor message-trace
+        :initarg  :message-trace)))
+
+
+(defun get-response-content (msg)
+   (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
+
+(defvar mst-tmp
+ '((:T) (:S) (:OP . 10)
+   (:D (:HEARTBEAT--INTERVAL . 41250)
+    (:--TRACE "[\"gateway-prd-us-east1-d-2ts5\",{\"micros\":0.0}]"))))
+
+
+(defmethod initialize-instance :around ((obj discord-message) &key  raw-message)
+  (let* ((message  (cl-json:decode-json-from-string raw-message))
+         (op-code  (au:aget message :op))
+         (event-data (au:aget message :d))
+         (sequence-number (au:aget message :s))
+         (event-name (au:aget message :t))
+         (message-trace (au:aget message :--TRACE)))
+    (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace)))
+
+
+(defgeneric op-code-reaction* (msg connection code)
+  (:documentation "Testing 'dynamic dispatch' "))
+
+
+(defun op-code-reaction (msg connection)
+  (op-code-reaction* msg connection  (op-code msg)))
+
+
+(defmethod op-code-reaction*  ((msg discord-message)  connection code)
+  (format nil "dispatch with op-code ~a" code))
 
 (defun make-sys (s)
   (when s
@@ -87,25 +119,15 @@
         (print (format nil "after ~d miliseconds have passed, you are relieved to hear 'lub-dub, lub-dub'" milis))
         (print (wsd:send connection *heartbeat*)))))
 
-(defvar mst-tmp
- '((:T) (:S) (:OP . 10)
-   (:D (:HEARTBEAT--INTERVAL . 41250)
-    (:--TRACE "[\"gateway-prd-us-east1-d-2ts5\",{\"micros\":0.0}]"))))
-
-
-
-
-(defun get-heartbeat--interval  (msg)
- (au:aget (au:aget msg :d) :heartbeat--interval))
+(defmethod op-code-reaction*  ((msg discord-message)  connection (code (eql 10)))
+  (print "Hello")
+  (let ((heartbeat (/ (au:aget (event-data  msg) :heartbeat--interval) 1000)))
+     (setf *heartbeat-task*  (ch:pexec () (keep-alive heartbeat connection)))))
 
 (defun make-on-message (connection)
-  (lambda (msg-)
-    (let* ((msg (cl-json:decode-json-from-string msg-))
-           (op-code (au:aget msg :op)))
-      (case op-code
-        (10  (let ((heartbeat (/ (get-heartbeat--interval msg) 1000)))
-               (setf *heartbeat-task*  (ch:pexec () (keep-alive heartbeat connection)))))
-        (print msg)))))
+  (lambda (raw-msg)
+    (let ((msg (make-instance 'discord-message :raw-message raw-msg)))
+     (op-code-reaction msg connection))))
 
 (defun connect->discord ()
  (let* ((discord-client (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
@@ -113,5 +135,4 @@
   (wsd:on :message discord-client on-message)
   (wsd:start-connection discord-client)))
 
-
-;(defparameter kourafeksala (connect->discord ))
+; (defvar savarakatranemia (connect->discord))
