@@ -25,6 +25,12 @@
 
 (defvar *open-ai-api-key* (gethash :gpt-token *config*))
 
+
+(defvar *input-channel* (make-instance 'ch:bounded-channel  :size 100))
+
+(defvar *output-channel*  (make-instance 'ch:bounded-channel  :size 100))
+
+
 (defclass discord-message ()
      ((op-code
         :accessor op-code
@@ -46,7 +52,6 @@
         :accessor message-trace
         :initarg  :message-trace)))
 
-
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
 
@@ -54,7 +59,6 @@
  '((:T) (:S) (:OP . 10)
    (:D (:HEARTBEAT--INTERVAL . 41250)
     (:--TRACE "[\"gateway-prd-us-east1-d-2ts5\",{\"micros\":0.0}]"))))
-
 
 (defmethod initialize-instance :around ((obj discord-message) &key  raw-message)
   (if raw-message
@@ -67,15 +71,15 @@
      (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace))
    (call-next-method)))
 
-(defgeneric op-code-reaction* (msg connection code)
+(defgeneric op-code-reaction* (msg channel code)
   (:documentation "Testing 'dynamic dispatch' "))
 
 
-(defun op-code-reaction (msg connection)
-  (op-code-reaction* msg connection  (op-code msg)))
+(defun op-code-reaction (msg channel)
+  (op-code-reaction* msg channel (op-code msg)))
 
 
-(defmethod op-code-reaction*  ((msg discord-message)  connection code)
+(defmethod op-code-reaction*  ((msg discord-message)  channel code)
   (format nil "dispatch with op-code ~a" code))
 
 (defun make-sys (s)
@@ -97,7 +101,6 @@
                              (make-sys system-message)
                              (merge-assistants assistant-messages)))))
 
-
 (defun send-davinci-message (message)
  (cl-json:decode-json-from-string
   (dex:post  chat-gpt-endpoint     ; ;
@@ -110,45 +113,53 @@
 (defvar *html-stream-in*  (make-instance 'ch:bounded-channel  :size 10))
 
 
-
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
 
+(defun output-message-loop (channel connection)
+   (ch:pexec ()
+    (loop
+      (let ((message (ch:recv channel)))
+        (print (format nil "output message: ~a" message))
+        (wsd:send connection message)))))
 
-(defvar *heartbeat* (json:encode-json-alist-to-string (acons :op  1 (acons :d  251 '()))))
-
-
-(defun keep-alive (interval connection)
- (let ((milis (* 1000 interval)))
+(defun keep-alive (interval channel)
+ (let ((milis (* 1000 interval))
+       (heartbeat (json:encode-json-alist-to-string  (pairlis  '(:op  :d) '(1 251)))))
   (loop (sleep interval)
         (print (format nil "after ~d miliseconds have passed, you are relieved to hear 'lub-dub, lub-dub'" milis))
-        (print (wsd:send connection *heartbeat*)))))
+        (ch:send channel heartbeat))))
 
-(defmethod op-code-reaction*  ((msg discord-message)  connection (code (eql 10)))
-  (print "Hello")
-  (let ((heartbeat (/ (au:aget (event-data  msg) :heartbeat--interval) 1000)))
-     (setf *heartbeat-task*  (ch:pexec () (keep-alive heartbeat connection)))))
+(defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 10)))
+  (let ((interval (/ (au:aget (event-data msg) :heartbeat--interval) 1000)))
+   (setf *heartbeat* (ch:pexec () (keep-alive interval channel)))))
 
-(defun make-on-message (connection)
+(defun make-on-message (channel)
   (lambda (raw-msg)
+    (print (format nil "Recieved message: ~a" raw-msg))
     (let ((msg (make-instance 'discord-message :raw-message raw-msg)))
-     (op-code-reaction msg connection))))
+     (op-code-reaction msg channel))))
+
+(defvar *output-loop-task*)
+
 
 (defun connect->discord ()
  (let* ((discord-client (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
-        (on-message (make-on-message discord-client)))
+        (on-message (make-on-message *output-channel*)))
+  (setf *output-loop-task* (output-message-loop *output-channel* discord-client))
   (wsd:on :message discord-client on-message)
   (wsd:start-connection discord-client)))
 
+(defvar *bot-identification-data*
+ (let (( properties '(("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
+  (pairlis '(:op :d) (list 2 (pairlis  '(:token :intents :properties)
+                                        (list *discord-token*  32256 properties))))))
 
 
-(defvar temp-object (make-instance 'discord-message
-                                  :op-code 2
-                                  :event-data  (pairlis  (list :token :properties)
-                                                         (list *discord-token*  '(("$os" . "linux") ("$browser" . "disco") ("$device" . "disco"))))))
 
-; (defvar savarakatranemia (connect->discord))
 
+;
+;(defparameter aliluia (connect->discord))
 ;  (json:encode-json-alist-to-string))
 ;  2  	Identify  	Send  	Starts a new session during the initial handshake.)
 
