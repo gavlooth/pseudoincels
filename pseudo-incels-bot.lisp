@@ -110,9 +110,12 @@
 
 (defvar *discord-token*   (gethash :DISCORD-TOKEN *config*))
 
+(defparameter *bot-headers* (pairlis  '("Authorization" "Content-Type" ) (list (format nil "Bot ~a" *discord-token*)  "application/json")))
+
+
 (defvar *guild-id* (gethash :guild-id *config*))
 
-(print *discord-token*)
+
 
 (defvar permisions "352724191280")
 
@@ -198,23 +201,70 @@
 
 ; (print (send-davinci-message "tell me a story for little children with dragons"))
 
+
+
+; In order to open and send a direct message to a user, you need these endpoints.
+;
+; For creating a new direct message
+;
+; POST /users/@me/channels
+;
+; For sending messages:
+;
+; POST /channels/{channel.id}/messages
+
+(defun user-id->channel (user-id)
+ (cl-json:decode-json-from-string
+  (dex:post  (format nil  "~a~a" *discord-base-url* "/users/@me/channels")
+    :headers *bot-headers*
+    :content  (json:encode-json-alist-to-string (list (cons :recipient_id user-id)))
+    :verbose t)))
+
+(defun post->channel (channel-id message)
+  (print channel-id)
+  (dex:post
+    (format nil "~a/channels/~a/messages"  *discord-base-url*   channel-id)
+    :headers *bot-headers*
+    :content (json:encode-json-alist-to-string (list (cons :content  message) (cons :tts "false")))))
+
+
 (defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
   (loop for i in (au:aget event-data :mentions)
         do
         (when (string= "PseudoAndrewTate"  (au:aget i :username))
-          (let ((content (PPCRE:regex-replace "\(\<@\\d*\>\\s*\)*" (au:aget event-data :content) ""))
-                (author-id (au:aget (au:aget event-data :author) :id)))
-            (print content)
+          (let  ((content (PPCRE:regex-replace "\(\<@\\d*\>\\s*\)*" (au:aget event-data :content) ""))
+                 (author-id (au:aget (au:aget event-data :author) :id)))
             (ch:pexec ()
-             (let* ((response (send-davinci-message content))
+             (let* ((dm-channel-data (user-id->channel  author-id))
+                    (dm-channel-id (au:aget dm-channel-data :id))
+                    (response (send-davinci-message content))
                     (narrative (get-response-content response)))
-              (setf *html-response* narrative)))
+               ; (setf -d dm-channel-id)
+               (setf *html-response* narrative)
+               (post->channel dm-channel-id  narrative)))
             (loop-finish)))))
 
-(describe *html-response*)
+(print *html-response*)
 (defmethod event-action ((event-data list ) event-hash)
-  (print event-hash)
-  (print event-data))
+  (print event-hash))
+
+(defvar narrative
+  "Once upon a time, in a far-off land, there was a dragon named Taragon who had a peculiar craving for power. Despite his immense strength, he yearned for even more power to rule over the kingdom as he saw fit.
+
+One day, while flying over a deserted mountain peak, Taragon stumbled upon a tiny bottle with a genie trapped inside. The genie promised Taragon three wishes in exchange for setting him free.
+
+With no hesitation, Taragon demanded his first wish - he wanted to be the most powerful dragon in the land. The genie granted his wish, and Taragon immediately felt an unparalleled power surging through his veins.
+
+But as days passed, Taragon's thirst for power only grew stronger, and he wished for more - he wanted to be invincible and immortal. The genie, bound by the rules of the granting of wishes, fulfilled his desires.
+
+As time went by, Taragon's unquenchable thirst for power left him with no allies or friends. He had become feared and ostracized by everyone in the kingdom. Even his fellow dragons were wary of his ambitions.
+
+Finally, one day, Taragon's loneliness and despair grew so great that he knew he had made a grave mistake in seeking ultimate power. Wisely, he used his last wish to undo the previous two and returned to his former dragon self.
+
+Thanks to the genie, Taragon learned a valuable lesson - that true power lies not in dominance, but in the strength of companionship and friendship.
+
+And from that day on, Taragon flew through the skies of the kingdom with newfound wisdom and humility, spreading his message of love and friendship to all who would listen.")
+
 
 
 (defun get-response-content (msg)
@@ -274,12 +324,10 @@
                          '(:guild_id :query :limit)
                          (list "41771983444115456" "" 0)))))))
 
-
 (defparameter commands (format nil "~a/applications/~a/commands" *discord-base-url* *discord-application-id*))
 
 (defparameter channels  (format nil "~a/guilds/~a/channels"  *discord-base-url*   *guild-id*))
 
-(defparameter headers (pairlis  '("Authorization" "Content-Type" ) (list (format nil "Bot ~a" *discord-token*)  "application/json")))
 
 (defvar chan-id  1088787295135617085)
 
@@ -372,3 +420,15 @@
 ;          (:AVATAR . "13509c95c14038d610c82e9be42e8c1c"))
 ;         (:ATTACHMENTS) (:GUILD--ID . "1088784698119036991")))
 ;
+
+
+; ; ( 579677178136887315)
+;
+;
+; (defvar pipa'((:ID . "1090359362993803295") (:TYPE . 1)
+;               (:LAST--MESSAGE--ID . "1090591299557675069") (:FLAGS . 0)
+;               (:RECIPIENTS
+;                ((:ID . "579677178136887315") (:USERNAME . "heefoo") (:GLOBAL--NAME)
+;                 (:DISPLAY--NAME) (:AVATAR . "13509c95c14038d610c82e9be42e8c1c")
+;                 (:AVATAR--DECORATION) (:DISCRIMINATOR . "4417") (:PUBLIC--FLAGS . 0)))))
+
