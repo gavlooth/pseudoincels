@@ -12,7 +12,7 @@
 
 (in-package #:pseudo-incels-bot)
 
-(defvar *config* (conf:get-conf-hash  (conf:init-conf ""  "incel-bot.conf")))
+(defvar  *config* (conf:get-conf-hash  (conf:init-conf ""  "incel-bot.conf")))
 
 (defun hash-keys (hash-table)
  (loop for key being the hash-keys of hash-table collect key))

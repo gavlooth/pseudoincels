@@ -2,6 +2,7 @@
 
 (in-package #:pseudo-incels-bot)
 
+; (ql:quickload :CL-PPCRE)
 ; (ql:quickload :pseudo-incels-bot)
 
 ; (ql:quickload :chanl)
@@ -9,14 +10,109 @@
 ; (ql:quickload :conf)
                         ; (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
 
+(defgeneric event-action (event-data event-hash))
+
+(defgeneric op-code-reaction* (msg channel code))
+
+(defvar  *html-response* '())
+
+(defvar *html-stream-in*  (make-instance 'ch:bounded-channel  :size 10))
 
 (defvar *discord-client*)
 
-(defvar application-id  (gethash :DISCORD-APP-ID *config*))
+(defvar *discord-base-url* "https://discord.com/api/v10")
+
+(defvar *command-channel* (make-instance 'ch:bounded-channel  :size 100))
+
+(defvar *discord-application-id*  (gethash :DISCORD-APP-ID *config*))
 
 (defvar public-key  (gethash :DISCORD-PUBLIC-KEY *config*))
 
 (defvar *discord-token*   (gethash :DISCORD-TOKEN *config*))
+
+(defvar *bot-identification-data*
+       (let (( properties '( ("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
+        (json:encode-json-alist-to-string  (pairlis '(:op :d) (list 2 (pairlis  '(:token :intents :properties)  (list *DISCORD-TOKEN* 32256  properties)))))))
+
+(print *bot-identification-data*)
+
+(defvar *guild-id* (gethash :guild-id *config*))
+
+(defvar permisions "352724191280")
+
+(defvar chat-gpt-endpoint "https://api.openai.com/v1/chat/completions")
+
+(defvar *heartbeat-task*)
+
+; (ch:kill (slot-value  *heartbeat* 'CH::THREAD))
+
+(defvar *open-ai-api-key* (gethash :gpt-token *config*))
+
+(defvar *gateway-channel*  (make-instance 'ch:bounded-channel  :size 100))
+
+
+(defclass discord-message ()
+     ((op-code
+        :accessor op-code
+        :initarg :op-code)
+      (event-data
+        :accessor event-data
+        :initarg :event-data)
+      (sequence-number
+        :initform nil
+        :accessor sequence-number
+        :initarg :sequence-number)
+      (event-name
+        :initform nil
+        :accessor event-name
+        :initarg  :event-name)
+      (message-trace
+        :initform nil
+        :accessor message-trace
+        :initarg  :message-trace)))
+
+(defun get-response-content (msg)
+   (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
+
+
+(defmethod initialize-instance :around ((obj discord-message) &key  raw-message)
+  (if raw-message
+   (let* ((message  (cl-json:decode-json-from-string raw-message))
+          (op-code  (au:aget message :op))
+          (event-data (au:aget message :d))
+          (sequence-number (au:aget message :s))
+          (event-name (au:aget message :t))
+          (message-trace (au:aget message :--TRACE)))
+     (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace))
+   (call-next-method)))
+
+
+(defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 0)))
+    (let ((event-hash  (SXHASH  (event-name   msg)))
+          (data (event-data msg)))
+      (event-action data  event-hash)))
+
+; (defgeneric  discord-event  num
+;   (:documentation "Testing 'dynamic dispatch' "))
+
+; (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 10))))
+
+
+(defvar *discord-client*)
+
+(defvar *discord-base-url* "https://discord.com/api/v10")
+
+(defvar *command-channel* (make-instance 'ch:bounded-channel  :size 100))
+
+(defvar *discord-application-id*  (gethash :DISCORD-APP-ID *config*))
+
+(defvar public-key  (gethash :DISCORD-PUBLIC-KEY *config*))
+
+(defvar *discord-token*   (gethash :DISCORD-TOKEN *config*))
+
+(defvar *guild-id* (gethash :guild-id *config*))
+
+(print *discord-token*)
 
 (defvar permisions "352724191280")
 
@@ -45,18 +141,12 @@
         :accessor event-name
         :initarg  :event-name)
       (message-trace
-
         :initform nil
         :accessor message-trace
         :initarg  :message-trace)))
 
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
-
-(defvar mst-tmp
- '((:T) (:S) (:OP . 10)
-   (:D (:HEARTBEAT--INTERVAL . 41250)
-    (:--TRACE "[\"gateway-prd-us-east1-d-2ts5\",{\"micros\":0.0}]"))))
 
 (defmethod initialize-instance :around ((obj discord-message) &key  raw-message)
   (if raw-message
@@ -72,13 +162,13 @@
 (defgeneric op-code-reaction* (msg channel code)
   (:documentation "Testing 'dynamic dispatch' "))
 
-
 (defun op-code-reaction (msg channel)
   (op-code-reaction* msg channel (op-code msg)))
 
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel code)
-  (format nil "dispatch with op-code ~a" code))
+  (print (format nil "dispatch with op-code ~a" code)))
+
 
 (defun make-sys (s)
   (when s
@@ -101,14 +191,30 @@
 
 (defun send-davinci-message (message)
  (cl-json:decode-json-from-string
-  (dex:post  chat-gpt-endpoint     ; ;
+  (dex:post  chat-gpt-endpoint
     :headers (list (cons "Authorization"  (format nil "Bearer ~a" *open-ai-api-key*)) (cons "Content-Type"  "application/json"))
     :content  (davinci-message message)
     :verbose t)))
 
-(defvar  *html-response* '())
+; (print (send-davinci-message "tell me a story for little children with dragons"))
 
-(defvar *html-stream-in*  (make-instance 'ch:bounded-channel  :size 10))
+(defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
+  (loop for i in (au:aget event-data :mentions)
+        do
+        (when (string= "PseudoAndrewTate"  (au:aget i :username))
+          (let ((content (PPCRE:regex-replace "\(\<@\\d*\>\\s*\)*" (au:aget event-data :content) ""))
+                (author-id (au:aget (au:aget event-data :author) :id)))
+            (print content)
+            (ch:pexec ()
+             (let* ((response (send-davinci-message content))
+                    (narrative (get-response-content response)))
+              (setf *html-response* narrative)))
+            (loop-finish)))))
+
+(describe *html-response*)
+(defmethod event-action ((event-data list ) event-hash)
+  (print event-hash)
+  (print event-data))
 
 
 (defun get-response-content (msg)
@@ -125,12 +231,22 @@
  (let ((milis (* 1000 interval))
        (heartbeat (json:encode-json-alist-to-string  (pairlis  '(:op  :d) '(1 251)))))
   (loop (sleep interval)
-        (print (format nil "after ~d miliseconds have passed, you are relieved to hear 'lub-dub, lub-dub'" milis))
+        (print (format nil "after ~d miliseconds have passed, you check for pulse" milis))
         (ch:send channel heartbeat))))
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 10)))
   (let ((interval (/ (au:aget (event-data msg) :heartbeat--interval) 1000)))
-   (setf *heartbeat* (ch:pexec () (keep-alive interval channel)))))
+   (setf *heartbeat* (ch:pexec ()
+                       (keep-alive interval channel)))))
+
+(defvar *identification-state* 0)
+
+(defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 11)))
+  (print "operation code 11, you are relieved to hear 'lub-dub, lub-dub'")
+  (when (= 0 *identification-state*)
+   (ch:send channel *bot-identification-data*)
+   (print "just for once, we identify as they/them")
+   (setf *identification-state* 1)))
 
 (defun make-on-message (channel)
   (lambda (raw-msg)
@@ -149,9 +265,6 @@
   (wsd:on :message discord-client on-message)
   (wsd:start-connection discord-client)))
 
-(defvar *bot-identification-data*
-       (let (( properties '( ("$os" . "linux") ("$browser" . "common-lisp") ("$device" . "common-lisp"))))
-        (json:encode-json-alist-to-string  (pairlis '(:op :d) (list 2 (pairlis  '(:token :intents :properties)  (list *DISCORD-TOKEN* 32256  properties)))))))
 
 (defvar *bot-opt*
   (let (( properties '(("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
@@ -162,107 +275,100 @@
                          (list "41771983444115456" "" 0)))))))
 
 
+(defparameter commands (format nil "~a/applications/~a/commands" *discord-base-url* *discord-application-id*))
 
-(cl-json:decode-json-from-string "{\"t\":\"READY\",\"s\":1,\"op\":0,\"d\":{\"v\":10,\"user_settings\":{},\"user\":{\"verified\":true,\"username\":\"PseudoAndrewTate\",\"mfa_enabled\":false,\"id\":\"1089180261163470870\",\"global_name\":null,\"flags\":0,\"email\":null,\"display_name\":null,\"discriminator\":\"1873\",\"bot\":true,\"avatar\":null},\"session_type\":\"normal\",\"session_id\":\"73d6704c4725675627e6d790218d2603\",\"resume_gateway_url\":\"wss://gateway-us-east1-d.discord.gg\",\"relationships\":[],\"private_channels\":[],\"presences\":[],\"guilds\":[{\"unavailable\":true,\"id\":\"1088784698119036991\"}],\"guild_join_requests\":[],\"geo_ordered_rtc_regions\":[\"bucharest\",\"milan\",\"frankfurt\",\"rotterdam\",\"russia\"],\"application\":{\"id\":\"1089180261163470870\",\"flags\":0},\"_trace\":[\"[\\\"gateway-prd-us-east1-d-v46p\\\",{\\\"micros\\\":102555,\\\"calls\\\":[\\\"id_created\\\",{\\\"micros\\\":2004,\\\"calls\\\":[]},\\\"session_lookup_time\\\",{\\\"micros\\\":1099,\\\"calls\\\":[]},\\\"session_lookup_finished\\\",{\\\"micros\\\":16,\\\"calls\\\":[]},\\\"discord-sessions-blue-prd-2-150\\\",{\\\"micros\\\":96413,\\\"calls\\\":[\\\"start_session\\\",{\\\"micros\\\":72401,\\\"calls\\\":[\\\"discord-api-54ccd7b85-t4z6w\\\",{\\\"micros\\\":63264,\\\"calls\\\":[\\\"get_user\\\",{\\\"micros\\\":14916},\\\"get_guilds\\\",{\\\"micros\\\":9366},\\\"send_scheduled_deletion_message\\\",{\\\"micros\\\":7},\\\"guild_join_requests\\\",{\\\"micros\\\":1},\\\"authorized_ip_coro\\\",{\\\"micros\\\":10}]}]},\\\"starting_guild_connect\\\",{\\\"micros\\\":59,\\\"calls\\\":[]},\\\"presence_started\\\",{\\\"micros\\\":450,\\\"calls\\\":[]},\\\"guilds_started\\\",{\\\"micros\\\":108,\\\"calls\\\":[]},\\\"guilds_connect\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"presence_connect\\\",{\\\"micros\\\":23340,\\\"calls\\\":[]},\\\"connect_finished\\\",{\\\"micros\\\":23346,\\\"calls\\\":[]},\\\"build_ready\\\",{\\\"micros\\\":22,\\\"calls\\\":[]},\\\"clean_ready\\\",{\\\"micros\\\":0,\\\"calls\\\":[]},\\\"optimize_ready\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"split_ready\\\",{\\\"micros\\\":24,\\\"calls\\\":[]}]}]}]\"]}}")
+(defparameter channels  (format nil "~a/guilds/~a/channels"  *discord-base-url*   *guild-id*))
 
-; (print *bot-identification-data*)
-; (json:encode-json-alist-to-string (print  (pairlis  '(:op  :d) '(1 251))))
+(defparameter headers (pairlis  '("Authorization" "Content-Type" ) (list (format nil "Bot ~a" *discord-token*)  "application/json")))
 
-;  (wsd:send connection message))
+(defvar chan-id  1088787295135617085)
 
-; (ch:send *gateway-channel*   *bot-identification-data*)
 
+(defparameter channel-post (format nil "~a/channels/~a/messages"  *discord-base-url*   chan-id))
+
+
+; (defun encode-discord-command (command)
+;   (json:encode-json-to-string
+;    (dict
+;      :model *openai-model*
+;      :messages (concatenate 'list
+;                              (list (dict :role "user" :content  message))
+;                              (make-sys system-message)
+;                              (merge-assistants assistant-messages)))))
+
+
+
+; Get Guild Channels
+; GET/guilds/{guild.id}/channels
 ;
-;(defparameter aliluia (connect->discord))
-;  (json:encode-json-alist-to-string))
-;  2  	Identify  	Send  	Starts a new session during the initial handshake.)
-
-
-; (cl-json:decode-json-from-string  "{\"t\":\"READY\",\"s\":1,\"op\":0,\"d\":{\"v\":10,\"user_settings\":{},\"user\":{\"verified\":true,\"username\":\"pseudoincels-bot\",\"mfa_enabled\":false,\"id\":\"1089180261163470870\",\"global_name\":null,\"flags\":0,\"email\":null,\"display_name\":null,\"discriminator\":\"1873\",\"bot\":true,\"avatar\":null},\"session_type\":\"normal\",\"session_id\":\"fa28650c82f04fddadb19ef698382bb7\",\"resume_gateway_url\":\"wss://gateway-us-east1-c.discord.gg\",\"relationships\":[],\"private_channels\":[],\"presences\":[],\"guilds\":[],\"guild_join_requests\":[],\"geo_ordered_rtc_regions\":[\"bucharest\",\"milan\",\"frankfurt\",\"rotterdam\",\"russia\"],\"application\":{\"id\":\"1089180261163470870\",\"flags\":0},\"_trace\":[\"[\\\"gateway-prd-us-east1-c-bgz7\\\",{\\\"micros\\\":101461,\\\"calls\\\":[\\\"id_created\\\",{\\\"micros\\\":1625,\\\"calls\\\":[]},\\\"session_lookup_time\\\",{\\\"micros\\\":375,\\\"calls\\\":[]},\\\"session_lookup_finished\\\",{\\\"micros\\\":17,\\\"calls\\\":[]},\\\"discord-sessions-blue-prd-2-287\\\",{\\\"micros\\\":98617,\\\"calls\\\":[\\\"start_session\\\",{\\\"micros\\\":52213,\\\"calls\\\":[\\\"discord-api-6856d85b7d-8lltt\\\",{\\\"micros\\\":45334,\\\"calls\\\":[\\\"get_user\\\",{\\\"micros\\\":13115},\\\"get_guilds\\\",{\\\"micros\\\":2609},\\\"send_scheduled_deletion_message\\\",{\\\"micros\\\":11},\\\"guild_join_requests\\\",{\\\"micros\\\":3147},\\\"authorized_ip_coro\\\",{\\\"micros\\\":10}]}]},\\\"starting_guild_connect\\\",{\\\"micros\\\":61,\\\"calls\\\":[]},\\\"presence_started\\\",{\\\"micros\\\":384,\\\"calls\\\":[]},\\\"guilds_started\\\",{\\\"micros\\\":2,\\\"calls\\\":[]},\\\"guilds_connect\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"presence_connect\\\",{\\\"micros\\\":45932,\\\"calls\\\":[]},\\\"connect_finished\\\",{\\\"micros\\\":45937,\\\"calls\\\":[]},\\\"build_ready\\\",{\\\"micros\\\":16,\\\"calls\\\":[]},\\\"clean_ready\\\",{\\\"micros\\\":0,\\\"calls\\\":[]},\\\"optimize_ready\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"split_ready\\\",{\\\"micros\\\":1,\\\"calls\\\":[]}]}]}]\"]}}")
+; Create Global Application Command
+; POST/applications/{application.id}/commands
 
 
 
-; ((:T . "READY") (:S . 1) (:OP . 0)
-;  (:D (:V . 10) (:USER--SETTINGS)
-;   (:USER (:VERIFIED . T) (:USERNAME . "pseudoincels-bot") (:MFA--ENABLED)
-;    (:ID . "1089180261163470870") (:GLOBAL--NAME) (:FLAGS . 0) (:EMAIL)
-;    (:DISPLAY--NAME) (:DISCRIMINATOR . "1873") (:BOT . T) (:AVATAR))
-;   (:SESSION--TYPE . "normal")
-;   (:SESSION--ID . "fa28650c82f04fddadb19ef698382bb7")
-;   (:RESUME--GATEWAY--URL . "wss://gateway-us-east1-c.discord.gg")
-;   (:RELATIONSHIPS) (:PRIVATE--CHANNELS) (:PRESENCES) (:GUILDS)
-;   (:GUILD--JOIN--REQUESTS)
-;   (:GEO--ORDERED--RTC--REGIONS "bucharest" "milan" "frankfurt" "rotterdam"
-;    "russia")
-;   (:APPLICATION (:ID . "1089180261163470870") (:FLAGS . 0))
-;   (:--TRACE
-;    "[\"gateway-prd-us-east1-c-bgz7\",{\"micros\":101461,\"calls\":[\"id_created\",{\"micros\":1625,\"calls\":[]},\"session_lookup_time\",{\"micros\":375,\"calls\":[]},\"session_lookup_finished\",{\"micros\":17,\"calls\":[]},\"discord-sessions-blue-prd-2-287\",{\"micros\":98617,\"calls\":[\"start_session\",{\"micros\":52213,\"calls\":[\"discord-api-6856d85b7d-8lltt\",{\"micros\":45334,\"calls\":[\"get_user\",{\"micros\":13115},\"get_guilds\",{\"micros\":2609},\"send_scheduled_deletion_message\",{\"micros\":11},\"guild_join_requests\",{\"micros\":3147},\"authorized_ip_coro\",{\"micros\":10}]}]},\"starting_guild_connect\",{\"micros\":61,\"calls\":[]},\"presence_started\",{\"micros\":384,\"calls\":[]},\"guilds_started\",{\"micros\":2,\"calls\":[]},\"guilds_connect\",{\"micros\":1,\"calls\":[]},\"presence_connect\",{\"micros\":45932,\"calls\":[]},\"connect_finished\",{\"micros\":45937,\"calls\":[]},\"build_ready\",{\"micros\":16,\"calls\":[]},\"clean_ready\",{\"micros\":0,\"calls\":[]},\"optimize_ready\",{\"micros\":1,\"calls\":[]},\"split_ready\",{\"micros\":1,\"calls\":[]}]}]}]")))
-
-; "Recieved message: {\"t\":null,\"s\":null,\"op\":11,\"d\":null}"
-
-
-; "Recieved message:
-; {\"t\":\"READY\",\"s\":1,\"op\":0,\"d\":{\"v\":10,\"user_settings\":{},\"user\":{\"verified\":true,\"username\":\"pseudoincels-bot\",\"mfa_enabled\":false,\"id\":\"1089180261163470870\",\"global_name\":null,\"flags\":0,\"email\":null,\"display_name\":null,\"discriminator\":\"1873\",\"bot\":true,\"avatar\":null},\"session_type\":\"normal\",\"session_id\":\"7e914f4898c0e2b76df23dfc32b878a5\",\"resume_gateway_url\":\"wss://gateway-us-east1-d.discord.gg\",\"relationships\":[],\"private_channels\":[],\"presences\":[],\"guilds\":[],\"guild_join_requests\":[],\"geo_ordered_rtc_regions\":[\"bucharest\",\"milan\",\"frankfurt\",\"rotterdam\",\"russia\"],\"application\":{\"id\":\"1089180261163470870\",\"flags\":0},\"_trace\":[\"[\\\"gateway-prd-us-east1-d-cg17\\\",{\\\"micros\\\":102294,\\\"calls\\\":[\\\"id_created\\\",{\\\"micros\\\":2046,\\\"calls\\\":[]},\\\"session_lookup_time\\\",{\\\"micros\\\":1286,\\\"calls\\\":[]},\\\"session_lookup_finished\\\",{\\\"micros\\\":25,\\\"calls\\\":[]},\\\"discord-sessions-blue-prd-2-36\\\",{\\\"micros\\\":97524,\\\"calls\\\":[\\\"start_session\\\",{\\\"micros\\\":86474,\\\"calls\\\":[\\\"discord-api-6856d85b7d-hgpsv\\\",{\\\"micros\\\":79003,\\\"calls\\\":[\\\"get_user\\\",{\\\"micros\\\":18323},\\\"get_guilds\\\",{\\\"micros\\\":6937},\\\"send_scheduled_deletion_message\\\",{\\\"micros\\\":8},\\\"guild_join_requests\\\",{\\\"micros\\\":1639},\\\"authorized_ip_coro\\\",{\\\"micros\\\":10}]}]},\\\"starting_guild_connect\\\",{\\\"micros\\\":52,\\\"calls\\\":[]},\\\"presence_started\\\",{\\\"micros\\\":378,\\\"calls\\\":[]},\\\"guilds_started\\\",{\\\"micros\\\":2,\\\"calls\\\":[]},\\\"guilds_connect\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"presence_connect\\\",{\\\"micros\\\":10580,\\\"calls\\\":[]},\\\"connect_finished\\\",{\\\"micros\\\":10592,\\\"calls\\\":[]},\\\"build_ready\\\",{\\\"micros\\\":22,\\\"calls\\\":[]},\\\"clean_ready\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"optimize_ready\\\",{\\\"micros\\\":1,\\\"calls\\\":[]},\\\"split_ready\\\",{\\\"micros\\\":0,\\\"calls\\\":[]}]}]}]\"]}}"
-
-
-
-; ((:T . "READY") (:S . 1) (:OP . 0)
-;  (:D (:V . 10) (:USER--SETTINGS)
-;   (:USER (:VERIFIED . T) (:USERNAME . "PseudoAndrewTate") (:MFA--ENABLED)
-;    (:ID . "1089180261163470870") (:GLOBAL--NAME) (:FLAGS . 0) (:EMAIL)
-;    (:DISPLAY--NAME) (:DISCRIMINATOR . "1873") (:BOT . T) (:AVATAR))
-;   (:SESSION--TYPE . "normal")
-;   (:SESSION--ID . "73d6704c4725675627e6d790218d2603")
-;   (:RESUME--GATEWAY--URL . "wss://gateway-us-east1-d.discord.gg")
-;   (:RELATIONSHIPS) (:PRIVATE--CHANNELS) (:PRESENCES)
-;   (:GUILDS ((:UNAVAILABLE . T)
-;             (:ID . "1088784698119036991")))
-;   (:GUILD--JOIN--REQUESTS)
-;   (:GEO--ORDERED--RTC--REGIONS "bucharest" "milan" "frankfurt" "rotterdam"
-;    "russia")
-;   (:APPLICATION (:ID . "1089180261163470870") (:FLAGS . 0))
-;   (:--TRACE
-;    "[\"gateway-prd-us-east1-d-v46p\",{\"micros\":102555,\"calls\":[\"id_created\",{\"micros\":2004,\"calls\":[]},\"session_lookup_time\",{\"micros\":1099,\"calls\":[]},\"session_lookup_finished\",{\"micros\":16,\"calls\":[]},\"discord-sessions-blue-prd-2-150\",{\"micros\":96413,\"calls\":[\"start_session\",{\"micros\":72401,\"calls\":[\"discord-api-54ccd7b85-t4z6w\",{\"micros\":63264,\"calls\":[\"get_user\",{\"micros\":14916},\"get_guilds\",{\"micros\":9366},\"send_scheduled_deletion_message\",{\"micros\":7},\"guild_join_requests\",{\"micros\":1},\"authorized_ip_coro\",{\"micros\":10}]}]},\"starting_guild_connect\",{\"micros\":59,\"calls\":[]},\"presence_started\",{\"micros\":450,\"calls\":[]},\"guilds_started\",{\"micros\":108,\"calls\":[]},\"guilds_connect\",{\"micros\":1,\"calls\":[]},\"presence_connect\",{\"micros\":23340,\"calls\":[]},\"connect_finished\",{\"micros\":23346,\"calls\":[]},\"build_ready\",{\"micros\":22,\"calls\":[]},\"clean_ready\",{\"micros\":0,\"calls\":[]},\"optimize_ready\",{\"micros\":1,\"calls\":[]},\"split_ready\",{\"micros\":24,\"calls\":[]}]}]}]")))
+; (print (dex:post   channel-post :headers headers :content (json:encode-json-alist-to-string (list (cons :content "Πάρτε και μια πίπα" ) (cons :tts "false")))))
+;  /channels/{channel.id}/messages)
+; (loop for i in (cl-json:decode-json-from-string "[{\"id\": \"1088784698823688243\", \"type\": 4, \"name\": \"Text Channels\", \"position\": 0, \"flags\": 0, \"parent_id\": null, \"guild_id\": \"1088784698119036991\", \"permission_overwrites\": []}, {\"id\": \"1088784698823688244\", \"type\": 4, \"name\": \"Voice Channels\", \"position\": 0, \"flags\": 0, \"parent_id\": null, \"guild_id\": \"1088784698119036991\", \"permission_overwrites\": []}, {\"id\": \"1088784698823688245\", \"last_message_id\": \"1090343266634977280\", \"type\": 0, \"name\": \"general\", \"position\": 0, \"flags\": 0, \"parent_id\": \"1088784698823688243\", \"topic\": null, \"guild_id\": \"1088784698119036991\", \"permission_overwrites\": [], \"rate_limit_per_user\": 0, \"nsfw\": false}, {\"id\": \"1088784698823688246\", \"last_message_id\": null, \"type\": 2, \"name\": \"General\", \"position\": 0, \"flags\": 0, \"parent_id\": \"1088784698823688244\", \"bitrate\": 64000, \"user_limit\": 0, \"rtc_region\": null, \"guild_id\": \"1088784698119036991\", \"permission_overwrites\": [], \"rate_limit_per_user\": 0, \"nsfw\": false}, {\"id\": \"1088787295135617085\", \"last_message_id\": \"1088787351184089089\", \"type\": 0, \"name\": \"chatgpt\", \"position\": 1, \"flags\": 0, \"parent_id\": null, \"topic\": null, \"guild_id\": \"1088784698119036991\", \"permission_overwrites\": [], \"rate_limit_per_user\": 0, \"nsfw\": false}]")
+;   do (when (string= (au:aget i :name)  "chatgpt")
+;        (return (parse-integer (au:aget i :id)))))
 ;
-; "Recieved message: {\"t\":null,\"s\":null,\"op\":11,\"d\":null}"
-
-; -----  HTTP
-
-(defvar *command-channel* (make-instance 'ch:bounded-channel  :size 100))
-
-"/guilds/{guild.id}/members/search  "
-
-; Authorization: Bot MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ.ZnCjm1XVW7vRze4b7Cq4se7kKWs
-
-
-(defun output-message-loop (channel http)
-   (ch:pexec ()
-    (loop
-      (let ((message (ch:recv channel)))
-        (print (format nil "output message: ~a" message))
-        (wsd:send connection message)))))
+; (defun commnad-loop (channel connection)
+;    (ch:pexec ()
+;     (loop
+;       (let ((command (ch:recv channel)))
+;         (print (format nil "sending command ~a" command))
+;         (dex:post  (format nil "https://discord.com/api/v10/applications/~a/commands") ; ;
+;           :headers  (pairlis  '("Authorization" "Content-Type" ) (list (format nil "Bot ~a" *discord-token*)  "application/json"))
+;           :content  (davinci-message message)
+;           :verbose t)))))
+;(defparameter savarakatranemia (connect->discord))
 
 
 
+; (defparameter event-msg (json:decode-json-from-string  "{\"t\":\"MESSAGE_CREATE\",\"s\":7,\"op\":0,\"d\":{\"type\":0,\"tts\":false,\"timestamp\":\"2023-03-29T11:16:05.911000+00:00\",\"referenced_message\":null,\"pinned\":false,\"nonce\":\"1090595233214758912\",\"mentions\":[],\"mention_roles\":[],\"mention_everyone\":false,\"member\":{\"roles\":[],\"premium_since\":null,\"pending\":false,\"nick\":null,\"mute\":false,\"joined_at\":\"2023-03-24T11:21:40.780000+00:00\",\"flags\":0,\"deaf\":false,\"communication_disabled_until\":null,\"avatar\":null},\"id\":\"1090595233353449574\",\"flags\":0,\"embeds\":[],\"edited_timestamp\":null,\"content\":\"\",\"components\":[],\"channel_id\":\"1088787295135617085\",\"author\":{\"username\":\"heefoo\",\"public_flags\":0,\"id\":\"579677178136887315\",\"global_name\":null,\"display_name\":null,\"discriminator\":\"4417\",\"avatar_decoration\":null,\"avatar\":\"13509c95c14038d610c82e9be42e8c1c\"},\"attachments\":[],\"guild_id\":\"1088784698119036991\"}}"))
 
-; import { axios } from "@pipedream/platform"
-; export default defineComponent({
-;                                 props: {
-;                                         discord_bot: {
-;                                                       type: "app",
-;                                                       app: "discord_bot",}}
+; (loop for i in (au:aget poutsa :mentions)
+;       do  (print (au:aget i :username)))
 ;
-;                                 ,
-;                                 async run({steps, $}) {
-;                                                        return await axios($, {
-;                                                                               method: 'POST',
-;                                                                               url: `https://discord.com/api/channels/<your channel id here>/messages`,
-;                                                                               headers: {
-;                                                                                         "Authorization": `Bot ${this.discord_bot.$auth.bot_token}`,}
-;                                                                               ,
-;                                                                               data: {
-;                                                                                      embeds: [ steps.generate_embed.$return_value.embed]}})}
-;
-;
-;                                 ,})
+
+
+; (print (car (au:aget poutsa :mentions)))
+
+; (defvar content (au:aget poutsa :content))
+
+; (ppcre:scan-to-strings "\<@[^\>]*\>"  content)
+; (print content)
+
+;  (ppcre:scan-to-strings "[^b]*b" "aaabd"))
+
+; (PPCRE:regex-replace "\@[1-9]*" content "frob")
+; (defvar poutsa
+;       '((:TYPE . 0) (:TTS) (:TIMESTAMP . "2023-03-29T19:41:52.209000+00:00")
+;         (:REFERENCED--MESSAGE) (:PINNED) (:NONCE . "1090722514729959424")
+;         (:MENTIONS
+;          ((:USERNAME . "PseudoAndrewTate") (:PUBLIC--FLAGS . 0)
+;           (:MEMBER (:ROLES "1090343266228117646") (:PREMIUM--SINCE) (:PENDING) (:NICK)
+;            (:MUTE) (:JOINED--AT . "2023-03-28T18:34:52.305013+00:00") (:FLAGS . 0)
+;            (:DEAF) (:COMMUNICATION--DISABLED--UNTIL) (:AVATAR))
+;           (:ID . "1089180261163470870") (:GLOBAL--NAME) (:DISPLAY--NAME)
+;           (:DISCRIMINATOR . "1873") (:BOT . T) (:AVATAR--DECORATION) (:AVATAR))
+;          ((:USERNAME . "heefoo") (:PUBLIC--FLAGS . 0)
+;           (:MEMBER (:ROLES) (:PREMIUM--SINCE) (:PENDING) (:NICK) (:MUTE)
+;            (:JOINED--AT . "2023-03-24T11:21:40.780000+00:00") (:FLAGS . 0) (:DEAF)
+;            (:COMMUNICATION--DISABLED--UNTIL) (:AVATAR))
+;           (:ID . "579677178136887315") (:GLOBAL--NAME) (:DISPLAY--NAME)
+;           (:DISCRIMINATOR . "4417") (:AVATAR--DECORATION)
+;           (:AVATAR . "13509c95c14038d610c82e9be42e8c1c")))
+;         (:MENTION--ROLES) (:MENTION--EVERYONE)
+;         (:MEMBER (:ROLES) (:PREMIUM--SINCE) (:PENDING) (:NICK) (:MUTE)
+;          (:JOINED--AT . "2023-03-24T11:21:40.780000+00:00") (:FLAGS . 0) (:DEAF)
+;          (:COMMUNICATION--DISABLED--UNTIL) (:AVATAR))
+;         (:ID . "1090722514952540353") (:FLAGS . 0) (:EMBEDS) (:EDITED--TIMESTAMP)
+;         (:CONTENT . "<@1089180261163470870>  <@579677178136887315>  parte poutso")
+;         (:COMPONENTS) (:CHANNEL--ID . "1088787295135617085")
+;         (:AUTHOR (:USERNAME . "heefoo") (:PUBLIC--FLAGS . 0)
+;          (:ID . "579677178136887315") (:GLOBAL--NAME) (:DISPLAY--NAME)
+;          (:DISCRIMINATOR . "4417") (:AVATAR--DECORATION)
+;          (:AVATAR . "13509c95c14038d610c82e9be42e8c1c"))
+;         (:ATTACHMENTS) (:GUILD--ID . "1088784698119036991")))
 ;
