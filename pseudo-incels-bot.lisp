@@ -12,7 +12,7 @@
 
 (defvar *html-stream-in*  (make-instance 'ch:bounded-channel  :size 10))
 
-(defvar *discord-client*)   client*
+(defvar *discord-client*)
 
 (defvar *discord-session-id* "")
 
@@ -38,7 +38,7 @@
 
 (defvar *heartbeat-task*)
 
-; (ch:kill (slot-value  *heartbeat* 'CH::THREAD))
+(defvar *output-loop-task*)
 
 (defvar *open-ai-api-key* (gethash :gpt-token *config*))
 
@@ -85,18 +85,6 @@
         (data (event-data msg)))
     (log:info (format nil "Dispatching event ~a with hash ~a" (event-name   msg) event-hash))
     (event-action data  event-hash)))
-
-
-
-
-(defmethod op-code-reaction*  ((msg discord-message) channel (code (eql 7)))
- (ch:send channel (json:encode-json-alist-to-string
-                    (pairlis
-                      '(:op  :d)
-                      (list 6 (pairlis '(:token :session_id :seq) (list  *discord-token* *discord-session-id* 1337))))))
-
- (log:info "Reconnecting"))
-
 
 (defvar *discord-client*)
 
@@ -193,17 +181,6 @@
     :content  (davinci-message message)
     :verbose t)))
 
-; (log:info (send-davinci-message "tell me a story for little children with dragons"))
-
-; In order to open and send a direct message to a user, you need these endpoints.
-;
-; For creating a new direct message
-;
-; POST /users/@me/channels
-;
-; For sending messages:
-;
-; POST /channels/{channel.id}/messages
 
 (defun user-id->channel (user-id)
  (cl-json:decode-json-from-string
@@ -221,6 +198,7 @@
 
 (defvar *narrative* "")
 (log:info *narrative*)
+
 (defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
   (loop for i in (au:aget event-data :mentions)
         do
@@ -248,17 +226,17 @@
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
 
 (defun output-message-loop (channel connection)
-   (ch:pexec ()
-    (loop
-      (let ((message (ch:recv channel)))
-        (log:info (format nil "output message: ~a" message))
-        (wsd:send connection message)))))
+  (setf *heartbeat-task* (ch:pexec ()
+                          (loop
+                            (let ((message (ch:recv channel)))
+                              (log:info (format nil "output message: ~a" message))
+                              (wsd:send connection message))))))
 
 (defun keep-alive (interval channel)
  (let ((milis (* 1000 interval))
        (heartbeat (json:encode-json-alist-to-string  (pairlis  '(:op  :d) '(1 251)))))
   (loop (sleep interval)
-        (log:info (format nil "after ~d miliseconds have passed, you check for pulse" milis))
+        ; (log:info (format nil "after ~d miliseconds have passed, you check for pulse" milis))
         (ch:send channel heartbeat))))
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 10)))
@@ -282,9 +260,6 @@
      (log:info raw-msg)
      (op-code-reaction msg channel))))
 
-(defvar *output-loop-task*)
-
-
 (defun connect->discord ()
  (let* ((discord-client (wsd:make-client "wss://gateway.discord.gg/?v=10&encoding=json"))
         (on-message (make-on-message *gateway-channel*)))
@@ -293,19 +268,38 @@
   (wsd:on :message discord-client on-message)
   (wsd:start-connection discord-client)))
 
+(defun reconnect ()
+  (handler-case  (ch:kill (ch:task-thread *heartbeat-task*))
+   (error (c)
+     (log:error (format t "Error closing *heartbeat-task*"))))
+  (handler-case (wsd:close-connection *discord-client*)
+   (error (c)
+     (log:error (format t "Error closing *heartbeat-task*"))))
+  (connect->discord))
 
-(defvar *bot-opt*
-  (let (( properties '(("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
-    (json:encode-json-alist-to-string
-      (pairlis '(:op :d)
-               (list 8 (pairlis
-                         '(:guild_id :query :limit)
-                         (list "41771983444115456" "" 0)))))))
-
-(defparameter commands (format nil "~a/applications/~a/commands" *discord-base-url* *discord-application-id*))
-
-(defparameter channels  (format nil "~a/guilds/~a/channels"  *discord-base-url*   *guild-id*))
+(defmethod op-code-reaction*  ((msg discord-message) channel (code (eql 7)))
+ (reconnect)
+ (log:info "Reconnecting"))
 
 
+; (ch:kill *heartbeat-task*)
+; (reconnect)
+; (defparameter commands (format nil "~a/applications/~a/commands" *discord-base-url* *discord-application-id*))
+;
+; (defparameter channels  (format nil "~a/guilds/~a/channels"  *discord-base-url*   *guild-id*))
+;
 
-;(defparameter savarakatranemia (connect->discord))
+; (defparameter savarakatranemia (connect->discord))
+
+; (log:info (send-davinci-message "tell me a story for little children with dragons"))
+
+; In order to open and send a direct message to a user, you need these endpoints.
+;
+; For creating a new direct message
+;
+; POST /users/@me/channels
+;
+; For sending messages:
+;
+; POST /channels/{channel.id}/messages
+
