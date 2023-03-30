@@ -1,9 +1,8 @@
 ;;;; pseudo-incels-bot.lisp
-
 (in-package #:pseudo-incels-bot)
+;  (ql:quickload :pseudo-incels-bot))
 
-; (ql:quickload :pseudo-incels-bot)
-
+; (ql:quickload :log4cl.log4slime)
 
 (defgeneric event-action (event-data event-hash))
 
@@ -80,21 +79,23 @@
      (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace))
    (call-next-method)))
 
+
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 0)))
-    (let ((event-hash  (SXHASH  (event-name   msg)))
-          (data (event-data msg)))
-      (print (format nil "Dispatching event ~a with hash ~a" (event-name   msg) event-hash))
-      (event-action data  event-hash)))
+  (let ((event-hash  (SXHASH  (event-name   msg)))
+        (data (event-data msg)))
+    (log:info (format nil "Dispatching event ~a with hash ~a" (event-name   msg) event-hash))
+    (event-action data  event-hash)))
 
 
 
 
-(defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 7)))
+(defmethod op-code-reaction*  ((msg discord-message) channel (code (eql 7)))
  (ch:send channel (json:encode-json-alist-to-string
                     (pairlis
                       '(:op  :d)
                       (list 6 (pairlis '(:token :session_id :seq) (list  *discord-token* *discord-session-id* 1337))))))
- (print "Reconnecting"))
+
+ (log:info "Reconnecting"))
 
 
 (defvar *discord-client*)
@@ -122,7 +123,6 @@
 (defvar *open-ai-api-key* (gethash :gpt-token *config*))
 
 (defvar *gateway-channel*  (make-instance 'ch:bounded-channel  :size 100))
-
 
 (defclass discord-message ()
      ((op-code
@@ -164,10 +164,8 @@
 (defun op-code-reaction (msg channel)
   (op-code-reaction* msg channel (op-code msg)))
 
-
 (defmethod op-code-reaction*  ((msg discord-message)  channel code)
-  (print (format nil "dispatch with op-code ~a" code)))
-
+  (log:info (format nil "dispatch with op-code ~a" code)))
 
 (defun make-sys (s)
   (when s
@@ -195,7 +193,7 @@
     :content  (davinci-message message)
     :verbose t)))
 
-; (print (send-davinci-message "tell me a story for little children with dragons"))
+; (log:info (send-davinci-message "tell me a story for little children with dragons"))
 
 ; In order to open and send a direct message to a user, you need these endpoints.
 ;
@@ -215,19 +213,19 @@
     :verbose t)))
 
 (defun post->channel (channel-id message)
-  (print channel-id)
+  (log:info channel-id)
   (dex:post
     (format nil "~a/channels/~a/messages"  *discord-base-url*   channel-id)
     :headers *bot-headers*
     :content (json:encode-json-alist-to-string (list (cons :content  message) (cons :tts "false")))))
 
 (defvar *narrative* "")
-(print *narrative*)
+(log:info *narrative*)
 (defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
   (loop for i in (au:aget event-data :mentions)
         do
         (when (string= "PseudoAndrewTate"  (au:aget i :username))
-          (print "Incel alert")
+          (log:info "Incel alert")
           (let  ((content (PPCRE:regex-replace "\(\<@\\d*\>\\s*\)*" (au:aget event-data :content) ""))
                  (author-id (au:aget (au:aget event-data :author) :id)))
             (ch:pexec ()
@@ -240,12 +238,11 @@
                  do (post->channel dm-channel-id  (str:substring  i  (+ 1992 i) narrative)))))
             (loop-finish)))))
 
-(defmethod event-action ((event-data list ) (event-hash (eql 2229288255679708455))) ;;"READY"
-  (setf *discord-session-id* (au:aget (au:aget event-data  :d) :session--id)))
-
+(defmethod event-action ((event-data list) (event-hash (eql 2229288255679708455))) ;;"READY"
+  (setf *discord-session-id* (au:aget event-data :session--id)))
 
 (defmethod event-action ((event-data list ) event-hash) ;; General
-  (print (format nil "Event data ~a" event-data)))
+  (log:info (format nil "Event data ~a" event-data)))
 
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
@@ -254,14 +251,14 @@
    (ch:pexec ()
     (loop
       (let ((message (ch:recv channel)))
-        (print (format nil "output message: ~a" message))
+        (log:info (format nil "output message: ~a" message))
         (wsd:send connection message)))))
 
 (defun keep-alive (interval channel)
  (let ((milis (* 1000 interval))
        (heartbeat (json:encode-json-alist-to-string  (pairlis  '(:op  :d) '(1 251)))))
   (loop (sleep interval)
-        (print (format nil "after ~d miliseconds have passed, you check for pulse" milis))
+        (log:info (format nil "after ~d miliseconds have passed, you check for pulse" milis))
         (ch:send channel heartbeat))))
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 10)))
@@ -272,16 +269,17 @@
 (defvar *identification-state* 0)
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 11)))
-  (print "operation code 11, you are relieved to hear 'lub-dub, lub-dub'")
+  (log:info "operation code 11, you are relieved to hear 'lub-dub, lub-dub'")
   (when (= 0 *identification-state*)
    (ch:send channel *bot-identification-data*)
-   (print "just for once, we identify as they/them")
+   (log:info "just for once, we identify as they/them")
    (setf *identification-state* 1)))
 
 (defun make-on-message (channel)
   (lambda (raw-msg)
-    (print (format nil "Recieved message: ~a" raw-msg))
     (let ((msg (make-instance 'discord-message :raw-message raw-msg)))
+     (log:info "Recieved message with op-code ~a" (op-code msg))
+     (log:info raw-msg)
      (op-code-reaction msg channel))))
 
 (defvar *output-loop-task*)

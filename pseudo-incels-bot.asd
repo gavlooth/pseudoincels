@@ -9,7 +9,7 @@
   :depends-on   (#:alexandria #:uiop #:iterate #:trivia
                  #:dexador #:cl-json #:serapeum #:bordeaux-threads
                  #:chanl #:clack #:websocket-driver #:websocket-driver-client
-                 #:assoc-utils #:conf  #:CL-PPCRE #:str)
+                 #:assoc-utils #:conf  #:CL-PPCRE #:str #:log4cl)
 
   :components ((:file "package")
                (:file "pseudo-incels-bot")))
