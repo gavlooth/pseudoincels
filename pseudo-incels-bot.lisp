@@ -282,12 +282,13 @@
  (log:info "Reconnecting"))
 
 
-; (ch:kill *heartbeat-task*)
-; (reconnect)
-; (defparameter commands (format nil "~a/applications/~a/commands" *discord-base-url* *discord-application-id*))
-;
-; (defparameter channels  (format nil "~a/guilds/~a/channels"  *discord-base-url*   *guild-id*))
-;
+(defvar  *program-loop* (ch:pexec
+                         () (progn
+                              (connect->discord)
+                              (loop
+                               (sleep interval 1800)
+                               (reconnect)))))
+
 
 ; (defparameter savarakatranemia (connect->discord))
 
