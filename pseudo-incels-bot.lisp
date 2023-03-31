@@ -26,9 +26,13 @@
 
 (defvar *discord-token*   (gethash :DISCORD-TOKEN *config*))
 
-(defvar *bot-identification-data*
-       (let (( properties '( ("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
-        (json:encode-json-alist-to-string  (pairlis '(:op :d) (list 2 (pairlis  '(:token :intents :properties)  (list *DISCORD-TOKEN* 32256  properties)))))))
+(defvar *bot-id*  nil)
+
+(defvar *discord-intents* (gethash :DISCORD-INTENTS *config*))
+
+(defvar *bot-identification-payload*
+       (let (( properties '(("os" . "linux") ("browser" . "common-lisp") ("device" . "common-lisp"))))
+        (json:encode-json-alist-to-string (pairlis '(:op :d) (list 2 (pairlis '(:token :intents :properties) (list *DISCORD-TOKEN* 32512 properties)))))))
 
 (defvar *guild-id* (gethash :guild-id *config*))
 
@@ -182,12 +186,24 @@
     :verbose t)))
 
 
+
+; /channels/{channel.id}
+
+(defun cha-id ()
+ (cl-json:decode-json-from-string
+  (dex:get (format nil  "~a/channels/~a" *discord-base-url* 1088787295135617085)
+    :headers (pairlis  '("Authorization" "Content-Type" ) (list (format nil "Bot ~a" *discord-token*)  "application/json"))
+    :content  nil
+    :verbose t)))
+
+;  https://discord.com/api/v8/users)
 (defun user-id->channel (user-id)
  (cl-json:decode-json-from-string
-  (dex:post  (format nil  "~a~a" *discord-base-url* "/users/@me/channels")
+  (dex:get (format nil  "~a~a" *discord-base-url* "/users/@me/channels")
     :headers *bot-headers*
     :content  (json:encode-json-alist-to-string (list (cons :recipient_id user-id)))
     :verbose t)))
+
 
 (defun post->channel (channel-id message)
   (log:info channel-id)
@@ -197,7 +213,6 @@
     :content (json:encode-json-alist-to-string (list (cons :content  message) (cons :tts "false")))))
 
 (defvar *narrative* "")
-(log:info *narrative*)
 
 (defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
   (loop for i in (au:aget event-data :mentions)
@@ -216,11 +231,19 @@
                  do (post->channel dm-channel-id  (str:substring  i  (+ 1992 i) narrative)))))
             (loop-finish)))))
 
+(defvar user* nil)
+
+(defmethod event-action ((event-data list) (event-hash (eql 863726046325453449))) ;;"   "USER_UPDATE""
+
+  (setf user* event-data)
+  (log:info "~a"  event-data))
+
 (defmethod event-action ((event-data list) (event-hash (eql 2229288255679708455))) ;;"READY"
-  (setf *discord-session-id* (au:aget event-data :session--id)))
+  (setf *discord-session-id* (au:aget event-data :session--id))
+  (setf *bot-id* (au:aget (au:aget event-data :user)  :id)))
 
 (defmethod event-action ((event-data list ) event-hash) ;; General
-  (log:info (format nil "Event data ~a" event-data)))
+  (log:info  "Event data: " event-data))
 
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
@@ -229,7 +252,7 @@
   (setf *heartbeat-task* (ch:pexec ()
                           (loop
                             (let ((message (ch:recv channel)))
-                              (log:info (format nil "output message: ~a" message))
+                              (log:info  "output message: ~a" message)
                               (wsd:send connection message))))))
 
 (defun keep-alive (interval channel)
@@ -244,20 +267,24 @@
    (setf *heartbeat* (ch:pexec ()
                        (keep-alive interval channel)))))
 
+(defvar statuses '())
+(defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 3)))
+   (setf statuses (event-data msg)))
+
 (defvar *identification-state* 0)
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 11)))
   (log:info "operation code 11, you are relieved to hear 'lub-dub, lub-dub'")
   (when (= 0 *identification-state*)
-   (ch:send channel *bot-identification-data*)
-   (log:info "just for once, we identify as they/them")
+   (ch:send channel *bot-identification-payload*)
+   (log:info "just for once,   we identify as they/them")
    (setf *identification-state* 1)))
 
 (defun make-on-message (channel)
   (lambda (raw-msg)
     (let ((msg (make-instance 'discord-message :raw-message raw-msg)))
-     (log:info "Recieved message with op-code ~a" (op-code msg))
-     (log:info raw-msg)
+     (log:info "Recieved message with op-code: ~a" (op-code msg))
+     (log:info "~a" raw-msg)
      (op-code-reaction msg channel))))
 
 (defun connect->discord ()
@@ -282,15 +309,18 @@
  (log:info "Reconnecting"))
 
 
-(defvar  *program-loop* (ch:pexec
-                         () (progn
-                              (connect->discord)
-                              (loop
-                               (sleep interval 1800)
-                               (reconnect)))))
+(defun main ()
+  (ch:pexec
+   () (progn
+        (connect->discord)
+        (loop
+         (sleep 900)
+         (reconnect)))))
 
 
 ; (defparameter savarakatranemia (connect->discord))
+
+; (main)
 
 ; (log:info (send-davinci-message "tell me a story for little children with dragons"))
 
@@ -303,4 +333,4 @@
 ; For sending messages:
 ;
 ; POST /channels/{channel.id}/messages
-
+; /channels/{channel.id}
