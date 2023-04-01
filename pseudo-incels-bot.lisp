@@ -83,7 +83,7 @@
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 0)))
   (let ((event-hash  (SXHASH  (event-name   msg)))
         (data (event-data msg)))
-    (log:info (format nil "Dispatching event ~a with hash ~a" (event-name   msg) event-hash))
+    (log:info  "Dispatching event ~a with hash ~a" (event-name   msg) event-hash)
     (event-action data  event-hash)))
 
 (defvar *discord-client*)
@@ -153,7 +153,7 @@
   (op-code-reaction* msg channel (op-code msg)))
 
 (defmethod op-code-reaction*  ((msg discord-message)  channel code)
-  (log:info (format nil "dispatch with op-code ~a" code)))
+  (log:info  "dispatch with op-code ~a" code))
 
 (defun make-sys (s)
   (when s
@@ -207,20 +207,24 @@
           (let  ((content (PPCRE:regex-replace "\(\<@\\d*\>\\s*\)*" (au:aget event-data :content) ""))
                  (author-id (au:aget (au:aget event-data :author) :id)))
             (ch:pexec ()
-             (let* ((dm-channel-data (user-id->channel  author-id))
-                    (dm-channel-id (au:aget dm-channel-data :id))
-                    (response (send-davinci-message content))
-                    (narrative (get-response-content response)))
-               (setf *narrative* narrative)
-               (loop for i from 0 to (length narrative) by 1992
-                 do (post->channel dm-channel-id  (str:substring  i  (+ 1992 i) narrative)))))
+             (handler-case
+              (let* ((dm-channel-data (user-id->channel  author-id))
+                     (dm-channel-id (au:aget dm-channel-data :id))
+                     (response (send-davinci-message content))
+                     (narrative (get-response-content response)))
+                (setf *narrative* narrative)
+                (loop for i from 0 to (length narrative) by 1992
+                  do (post->channel dm-channel-id  (str:substring  i  (+ 1992 i) narrative))))
+              (error (c)
+               (log:info "error when trying to communicate with CHATGPT: ~a" c))))
+
             (loop-finish)))))
 
 (defmethod event-action ((event-data list) (event-hash (eql 2229288255679708455))) ;;"READY"
   (setf *discord-session-id* (au:aget event-data :session--id)))
 
 (defmethod event-action ((event-data list ) event-hash) ;; General
-  (log:info (format nil "Event data ~a" event-data)))
+  (log:info "Event data ~a" event-data))
 
 (defun get-response-content (msg)
    (au:aget (au:aget (car (au:aget msg :choices )) :message ) :content))
@@ -229,7 +233,7 @@
   (setf *heartbeat-task* (ch:pexec ()
                           (loop
                             (let ((message (ch:recv channel)))
-                              (log:info (format nil "output message: ~a" message))
+                              (log:info "output message: ~a" message)
                               (wsd:send connection message))))))
 
 (defun keep-alive (interval channel)
@@ -257,7 +261,7 @@
   (lambda (raw-msg)
     (let ((msg (make-instance 'discord-message :raw-message raw-msg)))
      (log:info "Recieved message with op-code ~a" (op-code msg))
-     (log:info raw-msg)
+     (log:info "Raw message: ~a" raw-msg)
      (op-code-reaction msg channel))))
 
 (defun connect->discord ()
@@ -271,10 +275,10 @@
 (defun reconnect ()
   (handler-case  (ch:kill (ch:task-thread *heartbeat-task*))
    (error (c)
-     (log:error (format t "Error closing *heartbeat-task*"))))
+     (log:error  "Error closing *heartbeat-task* ~a" c)))
   (handler-case (wsd:close-connection *discord-client*)
    (error (c)
-     (log:error (format t "Error closing *heartbeat-task*"))))
+     (log:error "Error closing *heartbeat-task* : ~a" c)))
   (connect->discord))
 
 (defmethod op-code-reaction*  ((msg discord-message) channel (code (eql 7)))
@@ -282,12 +286,13 @@
  (log:info "Reconnecting"))
 
 
-(defvar  *program-loop* (ch:pexec
-                         () (progn
-                              (connect->discord)
-                              (loop
-                               (sleep interval 1800)
-                               (reconnect)))))
+(defvar  *program-loop*
+  (ch:pexec
+   () (progn
+        (connect->discord)
+        (loop
+         (sleep 900)
+         (reconnect)))))
 
 
 ; (defparameter savarakatranemia (connect->discord))
