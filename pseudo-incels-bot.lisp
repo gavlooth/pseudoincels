@@ -286,26 +286,13 @@
  (log:info "Reconnecting"))
 
 
-(defvar  *program-loop*
-  (ch:pexec
-   () (progn
-        (connect->discord)
-        (loop
-         (sleep 900)
-         (reconnect)))))
+(defvar  *program-loop*  nil)
 
-
-; (defparameter savarakatranemia (connect->discord))
-
-; (log:info (send-davinci-message "tell me a story for little children with dragons"))
-
-; In order to open and send a direct message to a user, you need these endpoints.
-;
-; For creating a new direct message
-;
-; POST /users/@me/channels
-;
-; For sending messages:
-;
-; POST /channels/{channel.id}/messages
+(defun main ()
+  (ch:pexec ()
+    (progn
+      (connect->discord)
+      (loop
+       (sleep 900)
+       (reconnect)))))
 
