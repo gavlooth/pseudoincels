@@ -3,6 +3,9 @@
 (asdf:defsystem #:pseudo-incels-bot
   :description "Describe pseudo-incels-bot here"
   :author "Your Name <your.name@example.com>"
+  :build-operation "program-op" ;; leave as is
+  :build-pathname "pseudoIncelsBot"
+  :entry-point "pseudo-incels-bot:main"
   :license  "Specify license here"
   :version "0.0.1"
   :serial t

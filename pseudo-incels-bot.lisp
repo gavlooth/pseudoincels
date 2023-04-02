@@ -79,7 +79,6 @@
      (call-next-method obj :op-code op-code :event-data event-data  :sequence-number sequence-number :event-name event-name :message-trace message-trace))
    (call-next-method)))
 
-
 (defmethod op-code-reaction*  ((msg discord-message)  channel (code (eql 0)))
   (let ((event-hash  (SXHASH  (event-name   msg)))
         (data (event-data msg)))
@@ -181,7 +180,6 @@
     :content  (davinci-message message)
     :verbose t)))
 
-
 (defun user-id->channel (user-id)
  (cl-json:decode-json-from-string
   (dex:post  (format nil  "~a~a" *discord-base-url* "/users/@me/channels")
@@ -196,9 +194,6 @@
     :headers *bot-headers*
     :content (json:encode-json-alist-to-string (list (cons :content  message) (cons :tts "false")))))
 
-(defvar *narrative* "")
-(log:info *narrative*)
-
 (defmethod event-action ((event-data list ) (event-hash (eql 668586304912467256)))
   (loop for i in (au:aget event-data :mentions)
         do
@@ -212,7 +207,6 @@
                      (dm-channel-id (au:aget dm-channel-data :id))
                      (response (send-davinci-message content))
                      (narrative (get-response-content response)))
-                (setf *narrative* narrative)
                 (loop for i from 0 to (length narrative) by 1992
                   do (post->channel dm-channel-id  (str:substring  i  (+ 1992 i) narrative))))
               (error (c)
